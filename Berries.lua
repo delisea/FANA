@@ -1,3 +1,60 @@
+List = {l = nil}
+List.__index = List
+
+function List:new()
+	o = {}
+	setmetatable(o, self)
+	o.__index = o
+	o.l = nil
+	return o
+end
+
+function List:push(e)
+	self.l = {t=e, n=self.l}
+end
+
+function List:find(finder)
+	it = self.l
+	while it ~= nil and not finder(it.t) do
+		it = it.n
+	end
+	return it and ti.t
+end
+
+function List:removeF(finder)
+	if (not self.l) or finder(self.l.t) then
+		self.l = self.l and self.l.n
+		return
+	end
+	it = self.l
+	while it.n ~= nil and finder(it.n.t) do
+		it = it.n
+	end
+	it.n = it.n and it.n.n
+end
+
+function List:remove(e)
+	if (not self.l) or self.l.t == e then
+		self.l = self.l and self.l.n
+		return
+	end
+	it = self.l
+	while it.n ~= nil and it.n.t == e do
+		it = it.n
+	end
+	it.n = it.n and it.n.n
+end
+
+function List:__len()
+	n = 0
+	it = self.l
+	while it ~= nil do
+		it = it.n
+		n = n + 1
+	end
+	return n
+end
+
 Activable = {_actifList={list=nil}}
 Activable.__index = Activable
 
@@ -82,6 +139,10 @@ function Folk:popOut(state, x, y)
 	self.state = state
 	self.house:disactivate()
 	self:activate()
+end
+
+function Folk:waitBuldingFree(x, y)
+	
 end
 
 function Folk:update()
