@@ -18,7 +18,7 @@ function List:find(finder)
 	while it ~= nil and not finder(it.t) do
 		it = it.n
 	end
-	return it and ti.t
+	return it and it.t
 end
 
 function List:removeF(finder)
@@ -135,6 +135,7 @@ end
 
 function Folk:popOut(state, x, y)
 	self.id = ModBase.SpawnItem("Client", x, y)
+	ModDebug.Log("pop out", self.id)
 	-- TODO Load client stats
 	self.state = state
 	self.house:disactivate()
@@ -147,6 +148,7 @@ end
 
 function Folk:update()
 	-- state -1 == inside
+	ModDebug.Log("St:", self.state)
 	if self.state%10 == 1 then -- moving state
 		-- maybe a timeout handle in case of error while moving
 		--Info = ModObject.GetObjectProperties(self.id)
@@ -182,10 +184,19 @@ function Folk:update()
 			coord = ModObject.GetObjectTileCoord(targetTable)
 			if scoord[1] == coord[1] and scoord[2] == coord[2]+1 then -- already there
 				-- claim house
-				self:moveIn(House:new(targetTable, coord[1], coord[2]))
+				self.state = 202 -- wait state
+				AskingStation:claim(self, coord[1], coord[2])
 			else
 				self:moveTo(coord[1], coord[2]+1)
 			end
+		end
+	elseif self.state == 210 then -- come back food state
+		scoord = ModObject.GetObjectTileCoord(self.id)
+		if scoord[1] == self.house.x and scoord[2] == self.house.y+1 then -- already there
+			self:popIn()
+			self.house.foodLevel = 5
+		else
+			self:moveTo(self.house.x, self.house.y+1)
 		end
 	end
 end
@@ -210,14 +221,16 @@ function House:new(id, x, y, folk, present, foodLevel)
    o.id=id
    o.x=x
    o.y=y
-   o.folkId = folk or nil
+   o.folk = folk or nil
    o.present = present or false
-   o.foodLevel = foodLevel or 0
+   o.foodLevel = foodLevel or 5
    return o
 end
 
 function House:update()
+	ModDebug.Log(self.foodLevel)
 	if self.foodLevel>0 then self.foodLevel = self.foodLevel - 1 end
+	ModDebug.Log(self.foodLevel)
 	if self.folk==nil or self.folk.state ~= -1 then
 	--idle state
 		error("House inconsistent state.")
@@ -226,6 +239,71 @@ function House:update()
 			self.folk:popOut(200, self.x, self.y+1) -- State seek food
 		end
 	end
+end
+
+
+
+AskingStation=Activable:subclass({id=0, x=0, y=0, state=0, folk=nil, stationList=List:new()})
+
+function AskingStation:claim(folk,x,y)
+	-- TODO check if already claimed w= must be done for multi-client
+	-- ie if as already existe on it
+	targetTable = ModBuilding.GetBuildingCoveringTile(x,y)
+	ModObject.SetObjectActive(targetTable, false)
+	tc = AskingStation:new(ModBase.SpawnItem("Table needing berry", x, y, true , true),x,y,100,folk)
+	ModObject.SetObjectRotation(tc.id, 0, 0, 0)
+	folk:disactivate()
+	self.stationList:push(tc)
+end
+
+function AskingStation:free()
+	self:disactivate()
+	ModObject.DestroyObject(self.id)
+	ModObject.SetObjectActive(ModBuilding.GetBuildingCoveringTile(self.x,self.y), true)
+	--self.id = ModBuilding.GetBuildingCoveringTile(x,y) not needed, deletion
+	self.folk.state = self.folk.state - (self.folk.state%10) + 10
+	self.folk:activate()
+	AskingStation.stationList:remove(self)
+end
+
+function AskingStation:new(id, x, y, state, folk)
+   o = {}
+   setmetatable(o, self)
+   o.__index = self
+   o.id=id
+   o.x=x
+   o.y=y
+   o.state= state or 0
+   o.folk = folk or nil
+   return o
+end
+
+function AskingStation:update()
+	--if self.folk==nil or self.folk.state ~= -1 then
+	--idle state
+	--	error("AskingStation inconsistent state.")
+	--else
+		if self.state - (self.state)%100 == 200 then
+			if self.state%100 > 0 then -- Using delivered object
+				self.state = self.state - 1
+			else -- done using delivered object
+				self:free()
+			end
+		end
+	--end
+end
+
+
+
+
+function fillTableWithFood(UserUID, TileX, TileY, TargetUID, TargetType)
+	as = AskingStation.stationList:find(function(e) return e.id == TargetUID; end)
+	ModObject.DestroyObject(TargetUID)
+	-- TODO spawn as
+	as.id = ModBase.SpawnItem("Table with berry", TileX, TileY, true , true)
+	ModObject.SetObjectRotation(as.id, 0, 0, 0)
+	as.state = 205
+	as:activate()
 end
 
 
@@ -358,6 +436,8 @@ function AfterLoad_LoadedWorld()
 	--ModBase.SpawnItem("Plate", 110, 72)
 	
 	ModBase.SpawnItem("Berry", 105, 67, true , true)
+	ModBase.SpawnItem("Berry", 105, 67, true , true)
+	ModBase.SpawnItem("Berry", 105, 67, true , true)
 end
 
 function WandCallback(UserUID, TileX, TileY, TargetUID, TargetType)
@@ -368,15 +448,15 @@ function NonPickupable(TargetType, TileX, TileY, TargetUID, UserUID)
 	MustDrop = {target=UserUID; next=MustDrop}
 end
 
-local tableWberry = 0
-function fillTableWithFood(UserUID, TileX, TileY, TargetUID, TargetType)
-	ModObject.DestroyObject(TargetUID)
-	tableWberry = ModBase.SpawnItem("Table with berry", TileX, TileY, true , true)
-	-- TODO TargetUID
-	objectTarget = tableWberry
-	--
-	ModObject.SetObjectRotation(tableWberry, 0, 0, 0)
-end
+--local tableWberry = 0
+-- function fillTableWithFood(UserUID, TileX, TileY, TargetUID, TargetType)
+	-- ModObject.DestroyObject(TargetUID)
+	-- tableWberry = ModBase.SpawnItem("Table with berry", TileX, TileY, true , true)
+	-- -- TODO TargetUID
+	-- objectTarget = tableWberry
+	-- --
+	-- ModObject.SetObjectRotation(tableWberry, 0, 0, 0)
+-- end
 
 function Creation()
 	math.randomseed(os.time())
@@ -416,7 +496,7 @@ function Creation()
 	ModHoldable.CreateHoldable("Table needing berry", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
 	ModHoldable.CreateHoldable("Table with berry", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
 	
-	ModTool.CreateTool("Berry", {"Stick"}, {1}, {"Table needing berry"}, {}, {}, {}, 2.0, "Models/Food/Berries", false, fillTableWithFood, true)
+	ModTool.CreateTool("Berry", {"Stick"}, {1}, {"Table needing berry"}, {}, {}, {}, 2.0, "Models/Food/Berries", false, fillTableWithFood, false)
 	
 	ModHoldable.RegisterForCustomCallback("Free Table", "HoldablePickedUp", NonPickupable)
 	ModHoldable.RegisterForCustomCallback("Table needing berry", "HoldablePickedUp", NonPickupable)
@@ -435,13 +515,13 @@ local ss = ""
 local time_sum = 0
 
 function OnUpdate(DeltaTime)
-	ModDebug.Log(TU)
+	--ModDebug.Log(TU)
 	time_sum = time_sum + DeltaTime
 	if time_sum < 1 then
 		return
 	end
 	time_sum = time_sum - 1
-	ModDebug.Log("T")
+	--ModDebug.Log("T")
 	--ModDebug.Log(os.time())
 	--if currentTime == 0 then
 	--	currentTime = os.time()
@@ -464,6 +544,7 @@ function OnUpdate(DeltaTime)
 	end
 	Folk:updateActifs()
 	House:updateActifs()
+	AskingStation:updateActifs()
 end	
 function noto()
 	while MustDrop ~= nil do
