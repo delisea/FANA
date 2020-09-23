@@ -1,3 +1,15 @@
+FoodList = { -- Name, from, Tier
+	{"BerriesSpice", 1},
+	{"AppleSpice", 1},
+	{"MushroomHerb", 1},
+	{"PumpkinHerb", 1},
+	{"FishHerb", 1}
+}
+
+ClothList = { -- Name, from, Tier
+	{"TopPoncho", 1}
+}
+
 List = {l = nil}
 List.__index = List
 
@@ -64,6 +76,9 @@ function Activable:activate()
 end
 
 function Activable:disactivate()
+	if self._actifList.list == nil then
+		return
+	end
 	if self._actifList.list.t == self then
 		self._actifList.list = self._actifList.next
 	else
@@ -73,8 +88,8 @@ function Activable:disactivate()
 		end
 		if it.next ~= nil then
 			it.next = it.next.next
-		else
-			error("Actif not found")
+		--else
+			--error("Actif not found")
 		end
 	end
 end
@@ -95,31 +110,37 @@ function Activable:subclass(newClass)
 end
 
 
-Folk=Activable:subclass({id=0, house=nil, state=0, dest={}})
+Folk=Activable:subclass({id=0, house=nil, state=0, dest={}, top=nil})
 local FolkVisionLength = 15
 
 function Folk:spawn(x,y)
    Folk:new(ModBase.SpawnItem("Client", x, y),100):activate()
 end
 
+function Folk:register(id)
+	Folk:new(id,100):activate()
+end
 
-function Folk:new(id, state, house)
+
+function Folk:new(id, state, house, top)
 	o = {}
 	setmetatable(o, self)
 	o.__index = o
 	o.id = id
-	o.state = state or 0;
-	o.house = house or nil;
+	o.state = state or 0
+	o.house = house or nil
+	o.top = top or nil
 	o.dest = {}
 	return o
 end
 
 function Folk:moveIn(house)
 	--ModDebug.Log("MoveIn")
+	houseCoord = house:coordinates()
 	self.house = house
 	house.folk = self
 	ModObject.DestroyObject(house.id)
-	house.id = ModBase.SpawnItem("Occupied Hut", house.x, house.y, true , true)
+	house.id = ModBase.SpawnItem("Occupied Hut", houseCoord[1], houseCoord[2], true , true)
 	ModObject.SetObjectRotation(house.id, 0, 0, 0)
 	-- TODO register registerHouse = {ID=objectTarget, next=occupiedHouses}
 	self:popIn()
@@ -134,12 +155,18 @@ function Folk:popIn()
 end
 
 function Folk:popOut(state, x, y)
-	self.id = ModBase.SpawnItem("Client", x, y)
+	self.id = ModBase.SpawnItem("Client" .. (self.top and (" with ".. self.top) or ""), x, y)
 	ModDebug.Log("pop out", self.id)
 	-- TODO Load client stats
 	self.state = state
 	self.house:disactivate()
 	self:activate()
+end
+
+function Folk:updateSkin()
+	coords = ModObject.GetObjectTileCoord(self.id)
+	ModObject.DestroyObject(self.id)
+	self.id = ModBase.SpawnItem("Client" .. (self.top and (" with ".. self.top) or ""), coords[1], coords[2])
 end
 
 function Folk:waitBuldingFree(x, y)
@@ -169,7 +196,7 @@ function Folk:update()
 			coord = ModObject.GetObjectTileCoord(targetHut)
 			if scoord[1] == coord[1] and scoord[2] == coord[2]+1 then -- already there
 				-- claim house
-				self:moveIn(House:new(targetHut, coord[1], coord[2]))
+				self:moveIn(House:new(targetHut))
 			else
 				self:moveTo(coord[1], coord[2]+1)
 			end
@@ -185,20 +212,50 @@ function Folk:update()
 			if scoord[1] == coord[1] and scoord[2] == coord[2]+1 then -- already there
 				-- claim house
 				self.state = 202 -- wait state
-				AskingStation:claim(self, coord[1], coord[2])
+				AskingStation:claim(self, coord[1], coord[2], self:chooseFood())
 			else
 				self:moveTo(coord[1], coord[2]+1)
 			end
 		end
 	elseif self.state == 210 then -- come back food state
+		local houseCoord = self.house:coordinates()
 		scoord = ModObject.GetObjectTileCoord(self.id)
-		if scoord[1] == self.house.x and scoord[2] == self.house.y+1 then -- already there
+		if scoord[1] == houseCoord[1] and scoord[2] == houseCoord[2]+1 then -- already there
 			self:popIn()
 			self.house.foodLevel = 5
 		else
-			self:moveTo(self.house.x, self.house.y+1)
+			self:moveTo(houseCoord[1], houseCoord[2]+1)
+		end
+	elseif self.state == 300 then -- searching cloth state
+		scoord = ModObject.GetObjectTileCoord(self.id)
+		tableList = ModBuilding.GetAllBuildingsUIDsOfType("Free Desk", scoord[1]-FolkVisionLength,scoord[2]-FolkVisionLength, scoord[1]+FolkVisionLength,scoord[2]+FolkVisionLength)
+		--TODO: closest?
+		targetTable = tableList[1]
+		if targetTable ~= nil and targetTable ~= -1 then
+			--ModDebug.Log("Found: I'm in ", scoord[1], " ", scoord[2])
+			coord = ModObject.GetObjectTileCoord(targetTable)
+			if scoord[1] == coord[1] and scoord[2] == coord[2]+1 then -- already there
+				-- claim house
+				self.state = 302 -- wait state
+				AskingStation:claimc(self, coord[1], coord[2], "TopPoncho")--self:chooseFood()
+			else
+				self:moveTo(coord[1], coord[2]+1)
+			end
+		end
+	elseif self.state == 310 then -- come back food state
+		local houseCoord = self.house:coordinates()
+		scoord = ModObject.GetObjectTileCoord(self.id)
+		if scoord[1] == houseCoord[1] and scoord[2] == houseCoord[2]+1 then -- already there
+			self:popIn()
+			self.house.clothLevel = 7
+		else
+			self:moveTo(houseCoord[1], houseCoord[2]+1)
 		end
 	end
+end
+
+function Folk:chooseFood()
+	return FoodList[1 + math.floor(math.random() * (#FoodList))][1]
 end
 
 function Folk:moveTo(dx, dy)
@@ -212,31 +269,39 @@ end
 
 -- TODO hut dispariton and move check
 
-House=Activable:subclass({id=0, x=0, y=0, foodLevel=0, folk=nil})
+House=Activable:subclass({id=0, foodLevel=0, clothLevel=0, folk=nil})
 
-function House:new(id, x, y, folk, present, foodLevel)
+function House:new(id, folk, present, foodLevel, clothLevel)
    o = {}
    setmetatable(o, self)
    o.__index = self
    o.id=id
-   o.x=x
-   o.y=y
    o.folk = folk or nil
    o.present = present or false
    o.foodLevel = foodLevel or 5
+   o.clothLevel = clothLevel or 0
    return o
 end
 
+function House:coordinates()
+	return ModObject.GetObjectTileCoord(self.id)
+end
+
 function House:update()
-	ModDebug.Log(self.foodLevel)
+	--ModDebug.Log(self.foodLevel)
 	if self.foodLevel>0 then self.foodLevel = self.foodLevel - 1 end
-	ModDebug.Log(self.foodLevel)
+	if self.clothLevel>0 then self.clothLevel = self.clothLevel - 1; if self.clothLevel==0 then self.folk.top = nil end end
+	--ModDebug.Log(self.foodLevel)
 	if self.folk==nil or self.folk.state ~= -1 then
 	--idle state
 		error("House inconsistent state.")
 	else
-		if self.foodLevel == 0 then
-			self.folk:popOut(200, self.x, self.y+1) -- State seek food
+		if self.clothLevel == 0 then
+			local coord = self:coordinates()
+			self.folk:popOut(300, coord[1], coord[2]+1) -- State seek cloth
+		elseif self.foodLevel == 0 then
+			local coord = self:coordinates()
+			self.folk:popOut(200, coord[1], coord[2]+1) -- State seek food
 		end
 	end
 end
@@ -245,12 +310,23 @@ end
 
 AskingStation=Activable:subclass({id=0, x=0, y=0, state=0, folk=nil, stationList=List:new()})
 
-function AskingStation:claim(folk,x,y)
+function AskingStation:claim(folk,x,y,objectAsked)
 	-- TODO check if already claimed w= must be done for multi-client
 	-- ie if as already existe on it
 	targetTable = ModBuilding.GetBuildingCoveringTile(x,y)
 	ModObject.SetObjectActive(targetTable, false)
-	tc = AskingStation:new(ModBase.SpawnItem("Table needing berry", x, y, true , true),x,y,100,folk)
+	tc = AskingStation:new(ModBase.SpawnItem("Table needing "..objectAsked, x, y, true , true),x,y,100,folk)
+	ModObject.SetObjectRotation(tc.id, 0, 0, 0)
+	folk:disactivate()
+	self.stationList:push(tc)
+end
+-- TODO remove
+function AskingStation:claimc(folk,x,y,objectAsked)
+	-- TODO check if already claimed w= must be done for multi-client
+	-- ie if as already existe on it
+	targetTable = ModBuilding.GetBuildingCoveringTile(x,y)
+	ModObject.SetObjectActive(targetTable, false)
+	tc = AskingStation:new(ModBase.SpawnItem("Desk asking "..objectAsked, x, y, true , true),x,y,100,folk)
 	ModObject.SetObjectRotation(tc.id, 0, 0, 0)
 	folk:disactivate()
 	self.stationList:push(tc)
@@ -300,10 +376,26 @@ function fillTableWithFood(UserUID, TileX, TileY, TargetUID, TargetType)
 	as = AskingStation.stationList:find(function(e) return e.id == TargetUID; end)
 	ModObject.DestroyObject(TargetUID)
 	-- TODO spawn as
-	as.id = ModBase.SpawnItem("Table with berry", TileX, TileY, true , true)
+	ModDebug.Log("Table with "..(string.gsub(TargetType, "Table needing ", "")))
+	as.id = ModBase.SpawnItem("Table with "..(string.gsub(TargetType, "Table needing ", "")), TileX, TileY, true , true)
 	ModObject.SetObjectRotation(as.id, 0, 0, 0)
 	as.state = 205
 	as:activate()
+end
+
+function clothOnClient(UserUID, TileX, TileY, TargetUID, TargetType)
+	as = AskingStation.stationList:find(function(e) return e.id == TargetUID; end)
+	as.folk.top = string.gsub(TargetType, "Desk asking ", "")
+	--ModDebug.Log(as.folk.top)
+	as.folk:updateSkin()
+	as:free()
+	--ModObject.DestroyObject(TargetUID)
+	-- TODO spawn as
+	--ModDebug.Log("Table with "..(string.gsub(TargetType, "Table needing ", "")))
+	--as.id = ModBase.SpawnItem("Table with "..(string.gsub(TargetType, "Table needing ", "")), TileX, TileY, true , true)
+	--ModObject.SetObjectRotation(as.id, 0, 0, 0)
+	--as.state = 205
+	--as:activate()
 end
 
 
@@ -364,7 +456,11 @@ function BeforeLoad()
 	-- Before Load Function - The majority of calls go here
 	
 	ModDebug.Log("MOD - Create Berry Recipe - All Converters - 1 stick = 10 berries produced") 
-	ModVariable.SetIngredientsForRecipe("Berries", {"Stick"}, {1}, 10)	
+	ModVariable.SetIngredientsForRecipe("Berries", {"Stick"}, {1}, 10)
+	
+	
+	ModVariable.SetIngredientsForRecipeSpecific("Cradle", "Client", {"Folk"}, {1}, 1) 
+	ModVariable.SetVariableForObjectAsInt("Cradle", "ConversionDelay", 10)
 	
 	ModDebug.Log("MOD - Set Storage for Sticks to 200")
 	ModVariable.SetVariableForStorageAmount("Stick", 200)
@@ -389,17 +485,33 @@ function BeforeLoad()
 	ModVariable.SetVariableForObjectAsInt("Free Hut", "MaxUsage", 999999999)
 	
 	
-	ModVariable.SetVariableForObjectAsInt("Berry", "MaxUsage", 1);
+	-- ModVariable.SetVariableForObjectAsInt("Berry", "MaxUsage", 1);
 	ModVariable.SetVariableFarmerAction("ModAction", "Table needing berry", "Berry", 1);
 	
+	
+	-- Set single usage object, their durability
+	for k,v in pairs(FoodList) do
+		ModVariable.SetVariableForObjectAsInt("Served "..v[1], "MaxUsage", 1);
+		ModVariable.SetIngredientsForRecipe("Served "..v[1], ModVariable.GetIngredientsForRecipe(v[1]), ModVariable.GetIngredientsAmountForRecipe(v[1]), 1)
+		ModVariable.AddRecipeToConverter("PotCrude", "Served "..v[1], 1)
+		ModVariable.RemoveRecipeFromConverter("PotCrude", v[1])
+	end
+	for k,v in pairs(ClothList) do
+		ModVariable.SetVariableForObjectAsInt("Top "..v[1], "MaxUsage", 1);
+		ModVariable.SetIngredientsForRecipe("Top "..v[1], ModVariable.GetIngredientsForRecipe(v[1]), ModVariable.GetIngredientsAmountForRecipe(v[1]), 1)
+	--	ModVariable.AddRecipeToConverter("PotCrude", "Served "..v[1], 1)
+	--	ModVariable.RemoveRecipeFromConverter("PotCrude", v[1])
+	end
+
+
+	
+	ModVariable.SetVariableForObjectAsFloat("Folk", "HeadScale", 5.0)
+	--ModVariable.SetVariableForObjectAsInt("BerriesSpice", "Unlocked", 0);
 end
 
 function AfterLoad()
 
 	-- After Load Function
-	
-	ModDebug.Log("MOD - Spawn Berries")
-	ModBase.SpawnItem("Berries", 50, 50)
 	
 	--currentTime = ModSaveData.LoadValue("currentTime") or 0
 	--ModDebug.Log(ModSaveData.LoadValue("currentTime"))
@@ -408,21 +520,26 @@ end
 
 function AfterLoad_CreatedWorld()
 end
-
+local test=0
 function AfterLoad_LoadedWorld()
 	--ModBase.SpawnItem("Berries", 110, 67)
 	--ModBase.SpawnItem("Berries", 110, 69)
 	------clientID = ModTiles.GetObjectUIDsOnTile(110,67)[1]
 	--clientID = 
-	Folk:spawn(110,67)
+	---------------Folk:spawn(110,67)
 	clientTarget = ModBase.SpawnItem("Free Hut", 105, 65, true , true)
+	ModBase.SpawnItem("Cradle", 103, 65, true , true)
+	
 	clientTarget = ModBase.SpawnItem("Free Table", 109, 65, true , true)
 	-----ModObject.SetObjectDurability(clientID, 999999997)
 	-----ModObject.SetObjectDurability(clientTarget, 999999997)
 	--ModGoTo.moveTo(clientID, 110, 69)
 	--ModBase.SpawnItem("MToll", 110, 70)
-	ModBase.SpawnItem("TreeCoconut", 110, 71)
-	
+	------ModBase.SpawnItem("TreeCoconut", 110, 71)
+	ModBase.SpawnItem("Folk", 110, 71)
+	--ModBase.SpawnItem("Hut", 110, 71,true,true)
+	--ModDebug.Log(#ModTiles.GetObjectUIDsOnTile(110,71))
+	--ModGoTo.moveTo(ModTiles.GetObjectUIDsOnTile(110,71)[2], 110, 60)
 	
 	--HutID = ModBase.SpawnItem("Hut", 110, 65, true , true)
 	--FolkID = ModBase.SpawnItem("Folk", 115, 65, true , true)
@@ -434,10 +551,14 @@ function AfterLoad_LoadedWorld()
 	
 	--ModBase.SpawnItem("Pot", 110, 73)
 	--ModBase.SpawnItem("Plate", 110, 72)
-	
-	ModBase.SpawnItem("Berry", 105, 67, true , true)
-	ModBase.SpawnItem("Berry", 105, 67, true , true)
-	ModBase.SpawnItem("Berry", 105, 67, true , true)
+	--ModBase.SpawnItem("PotCrude", 106, 68, true , true)
+	for k,v in pairs(FoodList) do
+		ModBase.SpawnItem("Served "..v[1], 105, 67, true , true)
+		ModBase.SpawnItem("Served "..v[1], 105, 67, true , true)
+	end
+	--ModBase.SpawnItem("Client", 105, 68, true , true)
+	--ModBase.SpawnItem("Client with Poncho", 105, 68, true , true)
+	ModBase.SpawnItem("Top TopPoncho", 105, 68, true , true)
 end
 
 function WandCallback(UserUID, TileX, TileY, TargetUID, TargetType)
@@ -445,8 +566,17 @@ function WandCallback(UserUID, TileX, TileY, TargetUID, TargetType)
 end
 
 function NonPickupable(TargetType, TileX, TileY, TargetUID, UserUID)
+	-- TODO: safer verification, replace at previous position
 	MustDrop = {target=UserUID; next=MustDrop}
 end
+
+function registerFolk(TargetType, TileX, TileY, TargetUID, UserUID)
+	-- TODO: safer verification, replace at previous position
+	Folk:register(TargetUID)
+end
+
+
+
 
 --local tableWberry = 0
 -- function fillTableWithFood(UserUID, TileX, TileY, TargetUID, TargetType)
@@ -459,13 +589,15 @@ end
 -- end
 
 function Creation()
+	ModDebug.Log(TU)
 	math.randomseed(os.time())
 	-- Creation of any new converters or buildings etc. go here
 	
 	ModDebug.Log("MOD - Create a new Berry Converter")
 	ModConverter.CreateConverter("TheBerryMaker", {"Berries"}, {"Plank", "Pole"}, {4, 3}, "ObjCrates/wooden boxes pack", {-1,-1}, {1,0}, {0,1}, {1,1})
 	
-	ModGoTo.CreateGoTo 	("Client", null, null, "Models/animals/animalalpaca", false)
+	ModGoTo.CreateGoTo("Client", null, null, "Folk/folk", true) --"Models/animals/animalalpaca", false
+	ModGoTo.UpdateModelRotation("Client", 0, -180,0) 
 	
 	ModHoldable.CreateHoldable("ReceptionDesk", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
 	--ModHoldable.CreateHoldable("Pot", {"Stick"}, {1}, "Pot/pot", true)
@@ -491,19 +623,62 @@ function Creation()
 	--ModBuilding.ShowBuildingAccessPoint("Occupied Hut", true) 
 	
 	-- Food base object
+	
+	-- -- ModHoldable.CreateHoldable("Table needing berry", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
+	-- -- ModHoldable.CreateHoldable("Table with berry", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
+	
+	-- -- ModTool.CreateTool("Berry", {"Stick"}, {1}, {"Table needing berry"}, {}, {}, {}, 2.0, "Models/Food/Berries", false, fillTableWithFood, false)
 	ModBuilding.CreateBuilding("Free Table", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {0,0}, {0,0}, {0,-2}, false)
 	ModBuilding.SetBuildingWalkable("Free Table", true)
-	ModHoldable.CreateHoldable("Table needing berry", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
-	ModHoldable.CreateHoldable("Table with berry", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
-	
-	ModTool.CreateTool("Berry", {"Stick"}, {1}, {"Table needing berry"}, {}, {}, {}, 2.0, "Models/Food/Berries", false, fillTableWithFood, false)
-	
 	ModHoldable.RegisterForCustomCallback("Free Table", "HoldablePickedUp", NonPickupable)
-	ModHoldable.RegisterForCustomCallback("Table needing berry", "HoldablePickedUp", NonPickupable)
-	ModHoldable.RegisterForCustomCallback("Table with berry", "HoldablePickedUp", NonPickupable)
+	-- -- ModHoldable.RegisterForCustomCallback("Table needing berry", "HoldablePickedUp", NonPickupable)
+	-- -- ModHoldable.RegisterForCustomCallback("Table with berry", "HoldablePickedUp", NonPickupable)
 	--ModHoldable.RegisterForCustomCallback("Raw Meat", "HoldablePickedUp", CallbackFunction)
 	--ModHoldable.RegisterForCustomCallback("Raw Meat", "HoldableDroppedOnGround", CallbackFunction)
-
+	
+	
+	ModConverter.CreateConverter("Cradle", {"Berries"}, {"Plank", "Pole"}, {4, 3}, "Cradle/cradle", {-1,-1}, {1,0}, {0,1}, {1,1})
+	------ModBuilding.ShowBuildingAccessPoint("Cradle", false) 
+	ModConverter.UpdateModelScale("Cradle", 3.0)
+	ModConverter.RegisterForCustomCallback("Cradle", "ConverterCreateItem", registerFolk)
+	----ModHoldable.RegisterForCustomCallback("Stick", "AddedToConverter", startCradle)
+	----ModConverter.RegisterForCustomCallback("Cradle", "ConverterComplete", endCradle)
+	
+	ModBuilding.CreateBuilding("Free Desk", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {0,0}, {0,0}, {0,-2}, false)
+	ModBuilding.SetBuildingWalkable("Free Desk", true)
+	ModHoldable.RegisterForCustomCallback("Free Desk", "HoldablePickedUp", NonPickupable)
+	
+	
+	-- Create AskingStation:food
+	for k,v in pairs(FoodList) do
+		-- Create object
+		ModHoldable.CreateHoldable("Table needing "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
+		ModHoldable.CreateHoldable("Table with "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
+		-- Set non pickupable
+		ModHoldable.RegisterForCustomCallback("Table needing "..v[1], "HoldablePickedUp", NonPickupable)
+		ModHoldable.RegisterForCustomCallback("Table with "..v[1], "HoldablePickedUp", NonPickupable)
+		
+		-- Create ServedFood
+		ModTool.CreateTool("Served "..v[1], {"LargeBowlClay", v[1]}, {1,1}, {"Table needing "..v[1]}, {}, {}, {}, 2.0, "Models/Food/"..v[1], false, fillTableWithFood, false)
+	end
+	
+	for k,v in pairs(ClothList) do
+		-- Create object
+		ModHoldable.CreateHoldable("Desk asking "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
+		--ModHoldable.CreateHoldable("Table with "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
+		-- Set non pickupable
+		ModHoldable.RegisterForCustomCallback("Desk asking "..v[1], "HoldablePickedUp", NonPickupable)
+		
+		-- Create ServedFood
+		ModTool.CreateTool("Top "..v[1], {}, {}, {"Desk asking "..v[1]}, {}, {}, {}, 8.0, "Models/Clothes/Tops/"..v[1], false, clothOnClient, false)
+		
+		ModGoTo.CreateGoTo("Client with "..v[1], null, null, "TopPoncho/FolkTopPoncho", true)
+		ModGoTo.UpdateModelScale("Client with "..v[1], 90.0)
+		ModGoTo.UpdateModelRotation("Client with "..v[1], 0, -180,0) 
+	end
+	
+	ModHoldable.UpdateModelScale("Folk", 30)
+	ModHoldable.UpdateModelRotation("Folk", -90,0,0) 
 end
 
 function ClientGoToObject(ClientID, TargetType, IsBuilding)
@@ -513,15 +688,33 @@ end
 
 local ss = ""
 local time_sum = 0
+test2 = false
 
 function OnUpdate(DeltaTime)
-	--ModDebug.Log(TU)
+	while MustDrop ~= nil do
+		if ModObject.GetObjectProperties(MustDrop.target)[1] ~= "FarmerPlayer" then
+			ModBot.DropAllHeldObjects(MustDrop.target)
+		else
+			ModPlayer.DropAllHeldObjects()
+		end
+		MustDrop = MustDrop.next
+	end
+
 	time_sum = time_sum + DeltaTime
 	if time_sum < 1 then
 		return
 	end
 	time_sum = time_sum - 1
-	--ModDebug.Log("T")
+	
+	if test ~= 0 then
+		if test2 then
+			ModObject.SetObjectRotation(test, 0, 0, 15)
+		else
+			ModObject.SetObjectRotation(test, 0, 0, -15) 
+		end
+		test2 = not test2
+	end
+	ModDebug.Log("T")
 	--ModDebug.Log(os.time())
 	--if currentTime == 0 then
 	--	currentTime = os.time()
@@ -547,14 +740,7 @@ function OnUpdate(DeltaTime)
 	AskingStation:updateActifs()
 end	
 function noto()
-	while MustDrop ~= nil do
-		if ModObject.GetObjectProperties(MustDrop.target)[1] ~= "FarmerPlayer" then
-			ModBot.DropAllHeldObjects(MustDrop.target)
-		else
-			ModPlayer.DropAllHeldObjects()
-		end
-		MustDrop = MustDrop.next
-	end
+	
 	
 	nextOccupiedHouses = nil
 	while occupiedHouses ~= nil do
