@@ -7,7 +7,9 @@ FoodList = { -- Name, from, Tier
 }
 
 ClothList = { -- Name, from, Tier
-	{"TopPoncho", 1}
+	{"TopPoncho", 1},
+	{"TopTunic", 1},
+	{"TopToga", 1}
 }
 
 List = {l = nil}
@@ -237,7 +239,7 @@ function Folk:update()
 			if scoord[1] == coord[1] and scoord[2] == coord[2]+1 then -- already there
 				-- claim house
 				self.state = 302 -- wait state
-				AskingStation:claimc(self, coord[1], coord[2], "TopPoncho")--self:chooseFood()
+				AskingStation:claimc(self, coord[1], coord[2], self:chooseCloth())--self:chooseFood()
 			else
 				self:moveTo(coord[1], coord[2]+1)
 			end
@@ -256,6 +258,9 @@ end
 
 function Folk:chooseFood()
 	return FoodList[1 + math.floor(math.random() * (#FoodList))][1]
+end
+function Folk:chooseCloth()
+	return ClothList[1 + math.floor(math.random() * (#ClothList))][1]
 end
 
 function Folk:moveTo(dx, dy)
@@ -399,6 +404,27 @@ function clothOnClient(UserUID, TileX, TileY, TargetUID, TargetType)
 end
 
 
+
+
+
+
+
+
+
+ExposingStation = {}
+
+ExposingStation:exposed(id, type_name, x, y)
+	-- No safety check
+	ModObject.DestroyObject(id)
+	ModBase.SpawnItem("Empty " .. type_name, x, y)
+end
+
+
+
+
+
+
+
 -- Berries Mod
 -- Creates a berry converter, adds recipe for creation of berries
 
@@ -497,8 +523,8 @@ function BeforeLoad()
 		ModVariable.RemoveRecipeFromConverter("PotCrude", v[1])
 	end
 	for k,v in pairs(ClothList) do
-		ModVariable.SetVariableForObjectAsInt("Top "..v[1], "MaxUsage", 1);
-		ModVariable.SetIngredientsForRecipe("Top "..v[1], ModVariable.GetIngredientsForRecipe(v[1]), ModVariable.GetIngredientsAmountForRecipe(v[1]), 1)
+		ModVariable.SetVariableForObjectAsInt(v[1].." on hanger", "MaxUsage", 1);
+		-----ModVariable.SetIngredientsForRecipe(v[1].." on hanger", ModVariable.GetIngredientsForRecipe(v[1]), ModVariable.GetIngredientsAmountForRecipe(v[1]), 1)
 	--	ModVariable.AddRecipeToConverter("PotCrude", "Served "..v[1], 1)
 	--	ModVariable.RemoveRecipeFromConverter("PotCrude", v[1])
 	end
@@ -507,6 +533,13 @@ function BeforeLoad()
 	
 	ModVariable.SetVariableForObjectAsFloat("Folk", "HeadScale", 5.0)
 	--ModVariable.SetVariableForObjectAsInt("BerriesSpice", "Unlocked", 0);
+	
+	
+		----TEST upgrade
+	--ClayStationCrude UpgradeTo Value:143
+	--ClayStation UpgradeFrom Value:142
+	-------Failed ModVariable.SetVariableForObjectAsInt("Cradle", "UpgradeTo", 169);
+	--ModVariable.SetVariableForObjectAsInt("ClayStation", "UpgradeFrom", 43); Free Hut
 end
 
 function AfterLoad()
@@ -557,8 +590,12 @@ function AfterLoad_LoadedWorld()
 		ModBase.SpawnItem("Served "..v[1], 105, 67, true , true)
 	end
 	--ModBase.SpawnItem("Client", 105, 68, true , true)
-	--ModBase.SpawnItem("Client with Poncho", 105, 68, true , true)
-	ModBase.SpawnItem("Top TopPoncho", 105, 68, true , true)
+	for k,v in pairs(ClothList) do
+		--ModBase.SpawnItem("Client with "..v[1], 105, 69, true , true)
+		ModBase.SpawnItem(v[1].." on hanger", 105, 69, true , true)
+	end
+	--ModBase.SpawnItem("Client", 105, 68, true , true)
+	--ModBase.SpawnItem("Top TopPoncho", 105, 67, true , true)
 end
 
 function WandCallback(UserUID, TileX, TileY, TargetUID, TargetType)
@@ -596,7 +633,7 @@ function Creation()
 	ModDebug.Log("MOD - Create a new Berry Converter")
 	ModConverter.CreateConverter("TheBerryMaker", {"Berries"}, {"Plank", "Pole"}, {4, 3}, "ObjCrates/wooden boxes pack", {-1,-1}, {1,0}, {0,1}, {1,1})
 	
-	ModGoTo.CreateGoTo("Client", null, null, "Folk/folk", true) --"Models/animals/animalalpaca", false
+	ModGoTo.CreateGoTo("Client", null, null, "Folk/Folk", true) --"Models/animals/animalalpaca", false
 	ModGoTo.UpdateModelRotation("Client", 0, -180,0) 
 	
 	ModHoldable.CreateHoldable("ReceptionDesk", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
@@ -648,6 +685,8 @@ function Creation()
 	ModBuilding.SetBuildingWalkable("Free Desk", true)
 	ModHoldable.RegisterForCustomCallback("Free Desk", "HoldablePickedUp", NonPickupable)
 	
+
+	
 	
 	-- Create AskingStation:food
 	for k,v in pairs(FoodList) do
@@ -662,6 +701,9 @@ function Creation()
 		ModTool.CreateTool("Served "..v[1], {"LargeBowlClay", v[1]}, {1,1}, {"Table needing "..v[1]}, {}, {}, {}, 2.0, "Models/Food/"..v[1], false, fillTableWithFood, false)
 	end
 	
+	
+	--ModBuilding.CreateBuilding("Cloth desk", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {0,0}, {0,0}, {0,-2}, false)
+	ClothNameList = {}
 	for k,v in pairs(ClothList) do
 		-- Create object
 		ModHoldable.CreateHoldable("Desk asking "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
@@ -670,12 +712,17 @@ function Creation()
 		ModHoldable.RegisterForCustomCallback("Desk asking "..v[1], "HoldablePickedUp", NonPickupable)
 		
 		-- Create ServedFood
-		ModTool.CreateTool("Top "..v[1], {}, {}, {"Desk asking "..v[1]}, {}, {}, {}, 8.0, "Models/Clothes/Tops/"..v[1], false, clothOnClient, false)
+		ModTool.CreateTool(v[1].." on hanger", {v[1], "Stick"}, {1, 1}, {"Desk asking "..v[1]}, {}, {}, {}, 8.0, "Models/Clothes/Tops/"..v[1], false, clothOnClient, false)
+		ClothNameList[#ClothNameList + 1] = v[1].." on hanger"
 		
-		ModGoTo.CreateGoTo("Client with "..v[1], null, null, "TopPoncho/FolkTopPoncho", true)
+		ModGoTo.CreateGoTo("Client with "..v[1], null, null, "Clothes/"..v[1].."/Folk"..v[1], true)
+		--ModGoTo.CreateGoTo("Client with "..v[1], null, null, "TopPoncho/FolkTopPoncho", true)
 		ModGoTo.UpdateModelScale("Client with "..v[1], 90.0)
-		ModGoTo.UpdateModelRotation("Client with "..v[1], 0, -180,0) 
+		ModGoTo.UpdateModelRotation("Client with "..v[1], 0, -180,0)
+		ModGoTo.UpdateModelTranslation("Client with "..v[1], 0,1.15,0) 
 	end
+	
+	ModConverter.CreateConverter("Cloth preparing station", ClothNameList, {"Plank", "Pole"}, {4, 3}, "ObjCrates/wooden boxes pack", {-1,-1}, {1,0}, {0,1}, {1,1})
 	
 	ModHoldable.UpdateModelScale("Folk", 30)
 	ModHoldable.UpdateModelRotation("Folk", -90,0,0) 
