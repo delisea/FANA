@@ -112,7 +112,7 @@ function Activable:subclass(newClass)
 end
 
 
-Folk=Activable:subclass({id=0, house=nil, state=0, dest={}, top=nil})
+Folk=Activable:subclass({id=0, house=nil, state=0, dest={}, top=nil, choice=nil})
 local FolkVisionLength = 15
 
 function Folk:spawn(x,y)
@@ -133,6 +133,7 @@ function Folk:new(id, state, house, top)
 	o.house = house or nil
 	o.top = top or nil
 	o.dest = {}
+	o.choice = nil
 	return o
 end
 
@@ -228,9 +229,9 @@ function Folk:update()
 		else
 			self:moveTo(houseCoord[1], houseCoord[2]+1)
 		end
-	elseif self.state == 300 then -- searching cloth state
+	elseif self.state == 300 then -- searching cloth desk state
 		scoord = ModObject.GetObjectTileCoord(self.id)
-		tableList = ModBuilding.GetAllBuildingsUIDsOfType("Free Desk", scoord[1]-FolkVisionLength,scoord[2]-FolkVisionLength, scoord[1]+FolkVisionLength,scoord[2]+FolkVisionLength)
+		tableList = ModBuilding.GetAllBuildingsUIDsOfType("Cloth desk", scoord[1]-FolkVisionLength,scoord[2]-FolkVisionLength, scoord[1]+FolkVisionLength,scoord[2]+FolkVisionLength)
 		--TODO: closest?
 		targetTable = tableList[1]
 		if targetTable ~= nil and targetTable ~= -1 then
@@ -238,13 +239,36 @@ function Folk:update()
 			coord = ModObject.GetObjectTileCoord(targetTable)
 			if scoord[1] == coord[1] and scoord[2] == coord[2]+1 then -- already there
 				-- claim house
-				self.state = 302 -- wait state
-				AskingStation:claimc(self, coord[1], coord[2], self:chooseCloth())--self:chooseFood()
+				self.state = 310 -- choosing cloth state
+				self.choice = nil
+				--AskingStation:claimc(self, coord[1], coord[2], self:chooseCloth())--self:chooseFood()
 			else
+				--ModDebug.Log("Move to  ", coord[1], coord[2]+1)
 				self:moveTo(coord[1], coord[2]+1)
 			end
 		end
-	elseif self.state == 310 then -- come back food state
+	elseif self.state == 310 then -- choosing cloth state
+		if self.choice == nil then
+			self.choice = self:chooseCloth().." on hanger"
+		end
+		scoord = ModObject.GetObjectTileCoord(self.id)
+		tableList = ModTiles.GetObjectsOfTypeInAreaUIDs(self.choice, scoord[1]-FolkVisionLength,scoord[2]-FolkVisionLength, scoord[1]+FolkVisionLength,scoord[2]+FolkVisionLength)
+		--TODO: closest?
+		targetTable = tableList[1]
+		--ModDebug.Log("Searching ", self.choice)
+		if targetTable ~= nil and targetTable ~= -1 then
+			coord = ModObject.GetObjectTileCoord(targetTable)
+			if scoord[1] == coord[1] and scoord[2] == coord[2] then -- already there
+				-- claim house
+				self.state = 320 -- get cloth
+				self.top = string.gsub(self.choice, " on hanger", "")
+				self:updateSkin()
+				ModObject.DestroyObject(targetTable)
+			else
+				self:moveTo(coord[1], coord[2])
+			end
+		end
+	elseif self.state == 320 then -- come back cloth state
 		local houseCoord = self.house:coordinates()
 		scoord = ModObject.GetObjectTileCoord(self.id)
 		if scoord[1] == houseCoord[1] and scoord[2] == houseCoord[2]+1 then -- already there
@@ -411,13 +435,13 @@ end
 
 
 
-ExposingStation = {}
+-- ExposingStation = {}
 
-ExposingStation:exposed(id, type_name, x, y)
-	-- No safety check
-	ModObject.DestroyObject(id)
-	ModBase.SpawnItem("Empty " .. type_name, x, y)
-end
+-- ExposingStation:exposed(id, type_name, x, y)
+	-- -- No safety check
+	-- ModObject.DestroyObject(id)
+	-- ModBase.SpawnItem("Empty " .. type_name, x, y)
+-- end
 
 
 
@@ -564,6 +588,7 @@ function AfterLoad_LoadedWorld()
 	ModBase.SpawnItem("Cradle", 103, 65, true , true)
 	
 	clientTarget = ModBase.SpawnItem("Free Table", 109, 65, true , true)
+	clientTarget = ModBase.SpawnItem("Cloth desk", 111, 65, true , true)
 	-----ModObject.SetObjectDurability(clientID, 999999997)
 	-----ModObject.SetObjectDurability(clientTarget, 999999997)
 	--ModGoTo.moveTo(clientID, 110, 69)
@@ -665,7 +690,9 @@ function Creation()
 	-- -- ModHoldable.CreateHoldable("Table with berry", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", false)
 	
 	-- -- ModTool.CreateTool("Berry", {"Stick"}, {1}, {"Table needing berry"}, {}, {}, {}, 2.0, "Models/Food/Berries", false, fillTableWithFood, false)
-	ModBuilding.CreateBuilding("Free Table", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {0,0}, {0,0}, {0,-2}, false)
+	-- -- -- ModBuilding.CreateBuilding("Free Table", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {0,0}, {0,0}, {0,-2}, false)
+	ModBuilding.CreateBuilding("Free Table", {"Stick"}, {1}, "Table/Table", {0,0}, {0,0}, {0,-2}, true)
+	ModBuilding.UpdateModelScale("Free Table", 2)
 	ModBuilding.SetBuildingWalkable("Free Table", true)
 	ModHoldable.RegisterForCustomCallback("Free Table", "HoldablePickedUp", NonPickupable)
 	-- -- ModHoldable.RegisterForCustomCallback("Table needing berry", "HoldablePickedUp", NonPickupable)
@@ -691,8 +718,10 @@ function Creation()
 	-- Create AskingStation:food
 	for k,v in pairs(FoodList) do
 		-- Create object
-		ModHoldable.CreateHoldable("Table needing "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
-		ModHoldable.CreateHoldable("Table with "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
+		ModHoldable.CreateHoldable("Table needing "..v[1], {}, {}, "Table/Table", true)
+		ModHoldable.UpdateModelScale("Table needing "..v[1], 2)
+		ModHoldable.CreateHoldable("Table with "..v[1], {}, {}, "Table/Table", true)
+		ModHoldable.UpdateModelScale("Table with "..v[1], 2)
 		-- Set non pickupable
 		ModHoldable.RegisterForCustomCallback("Table needing "..v[1], "HoldablePickedUp", NonPickupable)
 		ModHoldable.RegisterForCustomCallback("Table with "..v[1], "HoldablePickedUp", NonPickupable)
@@ -703,16 +732,18 @@ function Creation()
 	
 	
 	--ModBuilding.CreateBuilding("Cloth desk", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {0,0}, {0,0}, {0,-2}, false)
+	ModBuilding.CreateBuilding("Cloth desk", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {-1,-1}, {1,0}, {0,-2}, false)
+	
 	ClothNameList = {}
 	for k,v in pairs(ClothList) do
 		-- Create object
-		ModHoldable.CreateHoldable("Desk asking "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
+		--ModHoldable.CreateHoldable("Desk asking "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
 		--ModHoldable.CreateHoldable("Table with "..v[1], {}, {}, "Models/Buildings/storage/StorageGeneric", false)
 		-- Set non pickupable
-		ModHoldable.RegisterForCustomCallback("Desk asking "..v[1], "HoldablePickedUp", NonPickupable)
+		--ModHoldable.RegisterForCustomCallback("Desk asking "..v[1], "HoldablePickedUp", NonPickupable)
 		
 		-- Create ServedFood
-		ModTool.CreateTool(v[1].." on hanger", {v[1], "Stick"}, {1, 1}, {"Desk asking "..v[1]}, {}, {}, {}, 8.0, "Models/Clothes/Tops/"..v[1], false, clothOnClient, false)
+		ModHoldable.CreateHoldable(v[1].." on hanger", {v[1], "Stick"}, {1, 1}, "Models/Clothes/Tops/"..v[1], false)
 		ClothNameList[#ClothNameList + 1] = v[1].." on hanger"
 		
 		ModGoTo.CreateGoTo("Client with "..v[1], null, null, "Clothes/"..v[1].."/Folk"..v[1], true)
