@@ -1,9 +1,25 @@
-FoodList = { -- Name, from, Tier
-	{"BerriesSpice", 1},
-	{"AppleSpice", 1},
-	{"MushroomHerb", 1},
-	{"PumpkinHerb", 1},
-	{"FishHerb", 1}
+function shuffle(array)
+    local counter = #array
+    while counter > 1 do
+        local index = math.random(counter)
+		array[index], array[counter] = array[counter], array[index]
+        counter = counter - 1
+    end
+end
+
+
+FoodCategory = {
+	"Primary", -- champi, poisson
+	"Secondary", -- blé, carotte, citrouille
+	"Desert" -- baie, pomme
+}
+
+FoodList = { -- Name, Category, Tier
+	{"BerriesSpice","Desert", 1},
+	{"AppleSpice","Desert", 1},
+	{"MushroomHerb","Primary", 1},
+	{"PumpkinHerb","Secondary", 1},
+	{"FishHerb","Primary", 1}
 }
 
 ClothList = { -- Name, from, Tier
@@ -11,6 +27,8 @@ ClothList = { -- Name, from, Tier
 	{"TopTunic", 1},
 	{"TopToga", 1}
 }
+
+TimeoutDuration = 5
 
 List = {l = nil}
 List.__index = List
@@ -112,7 +130,7 @@ function Activable:subclass(newClass)
 end
 
 
-Folk=Activable:subclass({id=0, house=nil, state=0, dest={}, top=nil, choice=nil})
+Folk=Activable:subclass({id=0, house=nil, state=0, dest={}, top=nil, choice=nil, satisfaction=0, though=nil})
 local FolkVisionLength = 15
 
 function Folk:spawn(x,y)
@@ -134,6 +152,8 @@ function Folk:new(id, state, house, top)
 	o.top = top or nil
 	o.dest = {}
 	o.choice = nil
+	o.satisfaction = 0
+	o.though = nil
 	return o
 end
 
@@ -225,7 +245,7 @@ function Folk:update()
 		scoord = ModObject.GetObjectTileCoord(self.id)
 		if scoord[1] == houseCoord[1] and scoord[2] == houseCoord[2]+1 then -- already there
 			self:popIn()
-			self.house.foodLevel = 5
+			self.house.foodLevel = 5 * self.satisfaction
 		else
 			self:moveTo(houseCoord[1], houseCoord[2]+1)
 		end
@@ -248,15 +268,21 @@ function Folk:update()
 			end
 		end
 	elseif self.state == 310 then -- choosing cloth state
-		if self.choice == nil then
-			self.choice = self:chooseCloth().." on hanger"
-		end
 		scoord = ModObject.GetObjectTileCoord(self.id)
+		if self.choice == nil then
+			local choice = self:chooseCloth()
+			self.choice = choice.." on hanger"
+			self.though = Though:thinkOf("ThoughOf"..choice,scoord[1], scoord[2])
+		end
 		tableList = ModTiles.GetObjectsOfTypeInAreaUIDs(self.choice, scoord[1]-FolkVisionLength,scoord[2]-FolkVisionLength, scoord[1]+FolkVisionLength,scoord[2]+FolkVisionLength)
 		--TODO: closest?
 		targetTable = tableList[1]
 		--ModDebug.Log("Searching ", self.choice)
 		if targetTable ~= nil and targetTable ~= -1 then
+			if self.though ~= nil then
+				self.though:stopThinking()
+				self.though = nil
+			end
 			coord = ModObject.GetObjectTileCoord(targetTable)
 			if scoord[1] == coord[1] and scoord[2] == coord[2] then -- already there
 				-- claim house
@@ -281,7 +307,13 @@ function Folk:update()
 end
 
 function Folk:chooseFood()
-	return FoodList[1 + math.floor(math.random() * (#FoodList))][1]
+	-- Could be optimised
+	cf = {}
+	for i=1, #FoodCategory do
+		cf[i] = FoodCategory[i]
+	end
+	shuffle(cf)
+	return cf
 end
 function Folk:chooseCloth()
 	return ClothList[1 + math.floor(math.random() * (#ClothList))][1]
@@ -337,38 +369,69 @@ end
 
 
 
-AskingStation=Activable:subclass({id=0, x=0, y=0, state=0, folk=nil, stationList=List:new()})
+AskingStation=Activable:subclass({id=0, x=0, y=0, state=0, folk=nil, askedList=nil, though=nil, stationList=List:new()})
 
-function AskingStation:claim(folk,x,y,objectAsked)
+function AskingStation:claim(folk,x,y,objectsAsked)
 	-- TODO check if already claimed w= must be done for multi-client
 	-- ie if as already existe on it
 	targetTable = ModBuilding.GetBuildingCoveringTile(x,y)
 	ModObject.SetObjectActive(targetTable, false)
-	tc = AskingStation:new(ModBase.SpawnItem("Table needing "..objectAsked, x, y, true , true),x,y,100,folk)
+	tc = AskingStation:new(ModBase.SpawnItem("Table needing "..objectsAsked[1], x, y, true , true),x,y,100,folk)
 	ModObject.SetObjectRotation(tc.id, 0, 0, 0)
+	tc.askedList = objectsAsked
+	tc.state = 100 + TimeoutDuration
 	folk:disactivate()
 	self.stationList:push(tc)
+	tc:activate()
+	tc:update()
+	self.though = Though:thinkOf("ThoughOf"..objectsAsked[1],scoord[1], scoord[2])
 end
 -- TODO remove
-function AskingStation:claimc(folk,x,y,objectAsked)
-	-- TODO check if already claimed w= must be done for multi-client
-	-- ie if as already existe on it
-	targetTable = ModBuilding.GetBuildingCoveringTile(x,y)
-	ModObject.SetObjectActive(targetTable, false)
-	tc = AskingStation:new(ModBase.SpawnItem("Desk asking "..objectAsked, x, y, true , true),x,y,100,folk)
-	ModObject.SetObjectRotation(tc.id, 0, 0, 0)
-	folk:disactivate()
-	self.stationList:push(tc)
-end
+-- function AskingStation:claimc(folk,x,y,objectAsked)
+	-- -- TODO check if already claimed w= must be done for multi-client
+	-- -- ie if as already existe on it
+	-- targetTable = ModBuilding.GetBuildingCoveringTile(x,y)
+	-- ModObject.SetObjectActive(targetTable, false)
+	-- tc = AskingStation:new(ModBase.SpawnItem("Desk asking "..objectAsked, x, y, true , true),x,y,100,folk)
+	-- ModObject.SetObjectRotation(tc.id, 0, 0, 0)
+	-- folk:disactivate()
+	-- self.stationList:push(tc)
+-- end
 
 function AskingStation:free()
+	self.though:stopThinking()
+	self.though = nil
+	scoord = ModObject.GetObjectTileCoord(self.id)
+	x = scoord[1]
+	y = scoord[2]
 	self:disactivate()
 	ModObject.DestroyObject(self.id)
-	ModObject.SetObjectActive(ModBuilding.GetBuildingCoveringTile(self.x,self.y), true)
+	ModObject.SetObjectActive(ModBuilding.GetBuildingCoveringTile(x,y), true)
 	--self.id = ModBuilding.GetBuildingCoveringTile(x,y) not needed, deletion
 	self.folk.state = self.folk.state - (self.folk.state%10) + 10
+	self.folk.satisfaction = #self.askedList
 	self.folk:activate()
 	AskingStation.stationList:remove(self)
+	self.folk:update()
+end
+
+function AskingStation:timeout()
+	table.remove(self.askedList, 1)
+	if #self.askedList == 0 then
+		self:free()
+		return
+	end
+	-- TODO getObject property to avoid using Table needing
+	scoord = ModObject.GetObjectTileCoord(self.id)
+	x = scoord[1]
+	y = scoord[2]
+	ModObject.DestroyObject(self.id)
+	self.id = ModBase.SpawnItem("Table needing "..self.askedList[1], x, y, true , true)
+	ModObject.SetObjectRotation(self.id, 0, 0, 0)
+	self.state = self.state - (self.state%100) + TimeoutDuration
+	scoord = ModObject.GetObjectTileCoord(self.though.id)
+	self.though:stopThinking()
+	self.though = Though:thinkOf("ThoughOf"..self.askedList[1],scoord[1], scoord[2])
 end
 
 function AskingStation:new(id, x, y, state, folk)
@@ -380,6 +443,8 @@ function AskingStation:new(id, x, y, state, folk)
    o.y=y
    o.state= state or 0
    o.folk = folk or nil
+   o.askedList = nil
+   o.though = nil
    return o
 end
 
@@ -388,11 +453,17 @@ function AskingStation:update()
 	--idle state
 	--	error("AskingStation inconsistent state.")
 	--else
-		if self.state - (self.state)%100 == 200 then
+		if self.state - (self.state)%100 == 200 then -- Using delivered
 			if self.state%100 > 0 then -- Using delivered object
 				self.state = self.state - 1
 			else -- done using delivered object
 				self:free()
+			end
+		elseif self.state - (self.state)%100 == 100 then -- Wait delivering (0: timeout)
+			if self.state%100 > 0 then -- Waiting
+				self.state = self.state - 1
+			else -- Timeout
+				self:timeout()
 			end
 		end
 	--end
@@ -402,6 +473,7 @@ end
 
 
 function fillTableWithFood(UserUID, TileX, TileY, TargetUID, TargetType)
+	-- TODO find item in hand instead of reading name, for food
 	as = AskingStation.stationList:find(function(e) return e.id == TargetUID; end)
 	ModObject.DestroyObject(TargetUID)
 	-- TODO spawn as
@@ -409,7 +481,7 @@ function fillTableWithFood(UserUID, TileX, TileY, TargetUID, TargetType)
 	as.id = ModBase.SpawnItem("Table with "..(string.gsub(TargetType, "Table needing ", "")), TileX, TileY, true , true)
 	ModObject.SetObjectRotation(as.id, 0, 0, 0)
 	as.state = 205
-	as:activate()
+	--as:activate()
 end
 
 function clothOnClient(UserUID, TileX, TileY, TargetUID, TargetType)
@@ -431,9 +503,38 @@ end
 
 
 
+Though=Activable:subclass({id=0, rotation=0, typeName=nil, lastDelta = 0})
 
+function Though:new(id, typeName)
+   o = {}
+   setmetatable(o, self)
+   o.__index = self
+   o.id=id
+   o.typeName=typeName
+   o.rotation = 0
+   return o
+end
 
+function Though:thinkOf(typeName,x,y)
+	t = Though:new(ModBase.SpawnItem(typeName, x, y), typeName)
+	t:activate()
+	return t
+end
 
+function Though:stopThinking()
+	self:disactivate()
+	ModObject.DestroyObject(self.id)
+end
+
+function Though:update()
+	self.rotation = self.rotation + 180.0 * self.lastDelta
+	ModObject.SetObjectRotation(self.id, 0, self.rotation, 0)
+end
+
+function Though:updateActifs(lastDelta)
+	Though.lastDelta = lastDelta
+	Activable.updateActifs(Though)
+end
 
 -- ExposingStation = {}
 
@@ -621,6 +722,11 @@ function AfterLoad_LoadedWorld()
 	end
 	--ModBase.SpawnItem("Client", 105, 68, true , true)
 	--ModBase.SpawnItem("Top TopPoncho", 105, 67, true , true)
+	
+	
+	--- TEMPO ANIMATION
+	-- ModBase.SpawnItem("Client", 110, 67)
+	-- TempAnim = ModBase.SpawnItem("Thought", 110, 67)
 end
 
 function WandCallback(UserUID, TileX, TileY, TargetUID, TargetType)
@@ -691,10 +797,7 @@ function Creation()
 	
 	-- -- ModTool.CreateTool("Berry", {"Stick"}, {1}, {"Table needing berry"}, {}, {}, {}, 2.0, "Models/Food/Berries", false, fillTableWithFood, false)
 	-- -- -- ModBuilding.CreateBuilding("Free Table", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {0,0}, {0,0}, {0,-2}, false)
-	ModBuilding.CreateBuilding("Free Table", {"Stick"}, {1}, "Table/Table", {0,0}, {0,0}, {0,-2}, true)
-	ModBuilding.UpdateModelScale("Free Table", 2)
-	ModBuilding.SetBuildingWalkable("Free Table", true)
-	ModHoldable.RegisterForCustomCallback("Free Table", "HoldablePickedUp", NonPickupable)
+
 	-- -- ModHoldable.RegisterForCustomCallback("Table needing berry", "HoldablePickedUp", NonPickupable)
 	-- -- ModHoldable.RegisterForCustomCallback("Table with berry", "HoldablePickedUp", NonPickupable)
 	--ModHoldable.RegisterForCustomCallback("Raw Meat", "HoldablePickedUp", CallbackFunction)
@@ -712,28 +815,37 @@ function Creation()
 	ModBuilding.SetBuildingWalkable("Free Desk", true)
 	ModHoldable.RegisterForCustomCallback("Free Desk", "HoldablePickedUp", NonPickupable)
 	
-
-	
-	
+	-- Create Tables
+	ModBuilding.CreateBuilding("Free Table", {"Stick"}, {1}, "Table/Table", {0,0}, {0,0}, {0,-2}, true)
+	ModBuilding.UpdateModelScale("Free Table", 2)
+	ModBuilding.SetBuildingWalkable("Free Table", true)
+	ModHoldable.RegisterForCustomCallback("Free Table", "HoldablePickedUp", NonPickupable)
+	for k,v in pairs(FoodCategory) do
+		--ModDebug.Log("Table needing "..v)
+		-- Create object
+		ModHoldable.CreateHoldable("Table needing "..v, {}, {}, "Table/Table", true)
+		ModHoldable.UpdateModelScale("Table needing "..v, 2)
+		ModHoldable.CreateHoldable("Table with "..v, {}, {}, "Table/Table", true)
+		ModHoldable.UpdateModelScale("Table with "..v, 2)
+		-- Set non pickupable
+		ModHoldable.RegisterForCustomCallback("Table needing "..v, "HoldablePickedUp", NonPickupable)
+		ModHoldable.RegisterForCustomCallback("Table with "..v, "HoldablePickedUp", NonPickupable)
+		
+		ModHoldable.CreateHoldable("ThoughOf"..v, {}, {}, "Thoughs/"..v.."/though", true)
+		ModHoldable.UpdateModelRotation("ThoughOf"..v, 0, 0, 90)
+		ModHoldable.UpdateModelTranslation("ThoughOf"..v, 0,2.15,0) 
+		ModHoldable.RegisterForCustomCallback("ThoughOf"..v, "HoldablePickedUp", NonPickupable)
+	end
 	-- Create AskingStation:food
 	for k,v in pairs(FoodList) do
-		-- Create object
-		ModHoldable.CreateHoldable("Table needing "..v[1], {}, {}, "Table/Table", true)
-		ModHoldable.UpdateModelScale("Table needing "..v[1], 2)
-		ModHoldable.CreateHoldable("Table with "..v[1], {}, {}, "Table/Table", true)
-		ModHoldable.UpdateModelScale("Table with "..v[1], 2)
-		-- Set non pickupable
-		ModHoldable.RegisterForCustomCallback("Table needing "..v[1], "HoldablePickedUp", NonPickupable)
-		ModHoldable.RegisterForCustomCallback("Table with "..v[1], "HoldablePickedUp", NonPickupable)
-		
+		--ModDebug.Log("Served "..v[1] .. "   :   " .. "Table needing "..v[2])
 		-- Create ServedFood
-		ModTool.CreateTool("Served "..v[1], {"LargeBowlClay", v[1]}, {1,1}, {"Table needing "..v[1]}, {}, {}, {}, 2.0, "Models/Food/"..v[1], false, fillTableWithFood, false)
+		ModTool.CreateTool("Served "..v[1], {"LargeBowlClay", v[1]}, {1,1}, {"Table needing "..v[2]}, {}, {}, {}, 0.0, "Models/Food/"..v[1], false, fillTableWithFood, false)
+		-- old duration: 2.0
 	end
-	
 	
 	--ModBuilding.CreateBuilding("Cloth desk", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {0,0}, {0,0}, {0,-2}, false)
 	ModBuilding.CreateBuilding("Cloth desk", {"Stick"}, {1}, "Models/Buildings/storage/StorageGeneric", {-1,-1}, {1,0}, {0,-2}, false)
-	
 	ClothNameList = {}
 	for k,v in pairs(ClothList) do
 		-- Create object
@@ -750,13 +862,19 @@ function Creation()
 		--ModGoTo.CreateGoTo("Client with "..v[1], null, null, "TopPoncho/FolkTopPoncho", true)
 		ModGoTo.UpdateModelScale("Client with "..v[1], 90.0)
 		ModGoTo.UpdateModelRotation("Client with "..v[1], 0, -180,0)
-		ModGoTo.UpdateModelTranslation("Client with "..v[1], 0,1.15,0) 
+		ModGoTo.UpdateModelTranslation("Client with "..v[1], 0,1.15,0)
+		
+		ModHoldable.CreateHoldable("ThoughOf"..v[1], {}, {}, "Thoughs/"..v[1].."/though", true)
+		ModHoldable.UpdateModelRotation("ThoughOf"..v[1], 0, 0, 90)
+		ModHoldable.UpdateModelTranslation("ThoughOf"..v[1], 0,2.15,0) 
+		ModHoldable.RegisterForCustomCallback("ThoughOf"..v[1], "HoldablePickedUp", NonPickupable)
 	end
 	
 	ModConverter.CreateConverter("Cloth preparing station", ClothNameList, {"Plank", "Pole"}, {4, 3}, "ObjCrates/wooden boxes pack", {-1,-1}, {1,0}, {0,1}, {1,1})
 	
 	ModHoldable.UpdateModelScale("Folk", 30)
 	ModHoldable.UpdateModelRotation("Folk", -90,0,0) 
+	ModDebug.Log("Init Done")
 end
 
 function ClientGoToObject(ClientID, TargetType, IsBuilding)
@@ -768,7 +886,21 @@ local ss = ""
 local time_sum = 0
 test2 = false
 
+-- TempAnim = nil
+-- RTempAnim = 0.0
+
 function OnUpdate(DeltaTime)
+	-- RTempAnim = RTempAnim + DeltaTime*180.0
+	-- ModObject.SetObjectRotation(TempAnim, 0, RTempAnim, 0)
+
+
+	sn = ModBase.GetGameState()
+	if ss ~= sn then
+		ss = sn
+		ModDebug.Log(ss)
+	end
+	
+
 	while MustDrop ~= nil do
 		if ModObject.GetObjectProperties(MustDrop.target)[1] ~= "FarmerPlayer" then
 			ModBot.DropAllHeldObjects(MustDrop.target)
@@ -777,6 +909,8 @@ function OnUpdate(DeltaTime)
 		end
 		MustDrop = MustDrop.next
 	end
+
+	Though:updateActifs(DeltaTime)
 
 	time_sum = time_sum + DeltaTime
 	if time_sum < 1 then
